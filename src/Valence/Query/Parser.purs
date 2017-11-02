@@ -80,20 +80,20 @@ argument = do
 
 value :: Parser String AST.Value
 value = fix (\parser ->
-    variable          <|>
-    fValue            <|>
-    iValue            <|>
-    sValue            <|>
-    booleanValue      <|>
-    nullValue         <|>
-    enumValue         <|>
-    listValue parser  <|>
-    objectValue parser)
+    try variable            <|>
+    try fValue              <|>
+    try iValue              <|>
+    try sValue              <|>
+    try booleanValue        <|>
+    try nullValue           <|>
+    try enumValue           <|>
+    try (listValue parser)  <|>
+    try (objectValue parser))
   where
     iValue                = AST.IntValue      <$> (intValue <#> readInt 10)
     fValue                = AST.FloatValue    <$> (floatValue <#> readFloat)
     sValue                = AST.StringValue   <$> stringValue
-    booleanValue          = AST.BooleanValue  <$> ((nameMatcher "true" $> true) <|> (nameMatcher "false" $> false))
+    booleanValue          = AST.BooleanValue  <$> (try (nameMatcher "true" $> true) <|> try (nameMatcher "false" $> false))
     enumValue             = AST.EnumValue     <$> notNameMatcher ["true", "false", "null"]
     listValue valueParser = AST.ListValue     <$> (between lBracket rBracket (many valueParser))
     objectValue parser    = AST.ObjectValue   <$> (between lCurlyBracket rCurlyBracket (many $ (objectField parser)))
@@ -144,13 +144,11 @@ gqlType = fix (\parser ->  namedType <|> listType parser <|> nonNullType parser)
     nonNullNamed = AST.NonNullNamed <$> (name <* exclamation)
     nonNullList parser = AST.NonNullList <$> ((listType parser) <* exclamation)
 
-
-
 nameMatcher :: String -> Parser String String 
 nameMatcher str = name >>= (\n -> 
-  if n == ""
-  then fail ("Expected " <> str <> " but found " <> n)
-  else pure n)
+  if n == str 
+  then pure n   
+  else fail ("Expected " <> str <> " but found " <> n))
 
 notNameMatcher :: Array String -> Parser String String
 notNameMatcher badNames = name >>= (\str ->

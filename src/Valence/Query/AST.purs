@@ -1,5 +1,6 @@
 module Valence.Query.AST where
 
+import Prelude
 
 import Data.Maybe (Maybe)
 import Data.NonEmpty (NonEmpty)
@@ -57,7 +58,36 @@ data Value
   | ListValue (Array Value)
   | ObjectValue (Array ObjectField)
 
+instance valueShow :: Show Value where
+  show (Variable v) = "(Variable " <> (show v) <> ")"
+  show (IntValue num) = "(IntValue " <> (show num) <> ")"
+  show (FloatValue num) = "(FloatValue " <> (show num) <> ")"
+  show (StringValue str) = "(StringValue " <> (show str) <> ")"
+  show (BooleanValue b) = "(BooleanValue " <> (show b) <> ")"
+  show NullValue = "(NullValue)"
+  show (EnumValue enum) = "(EnumValue " <> (show enum) <> ")"
+  show (ListValue v) = "(ListValue " <> (show v) <> ")"
+  show (ObjectValue fields) = "(ObjectValue " <> (show fields) <> ")"
+
+instance valueEQ :: Eq Value where
+  eq (Variable v1) (Variable v2) = v1 == v2 
+  eq (IntValue num1) (IntValue num2) = num1 == num2
+  eq (FloatValue num1) (FloatValue num2) = num1 == num2
+  eq (StringValue str1) (StringValue str2) = str1 == str2
+  eq (BooleanValue b1) (BooleanValue b2) = b1 == b2
+  eq (NullValue) (NullValue) = true
+  eq (EnumValue enum1) (EnumValue enum2) = enum1 == enum2 
+  eq (ListValue v1) (ListValue v2) = v1 == v2 
+  eq (ObjectValue fields1) (ObjectValue fields2) = fields1 == fields2
+  eq _ _ = false
+
 data ObjectField = ObjectField String Value
+
+instance objectFieldShow :: Show ObjectField where
+  show (ObjectField n v) = "(ObjectField (Name " <> n <> ") " <> (show v) <> ")"
+
+instance objectFieldEq :: Eq ObjectField where
+  eq (ObjectField n1 v1) (ObjectField n2 v2) = (n1 == n2) && (v1 == v2)
 
 type ObjectFields = Array ObjectField
 
