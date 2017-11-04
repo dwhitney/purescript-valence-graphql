@@ -48,10 +48,7 @@ selectionSet :: Parser String AST.SelectionSet
 selectionSet = fix (\parser -> between lCurlyBracket rCurlyBracket (do
   s   <- selection
   ss  <- many selection
-  pure (s :| ss)))
-
-optionalSelectionSet :: Parser String AST.OptionalSelectionSet
-optionalSelectionSet = fix (\parser -> between lCurlyBracket rCurlyBracket (many selection))
+  pure $ AST.SelectionSet (s :| ss)))
 
 selection :: Parser String AST.Selection
 selection = fix (\parser -> selectionField parser <|> selectionFragmentSpread <|> (selectionInlineFragment parser))
@@ -113,7 +110,7 @@ fragmentSpread = AST.FragmentSpread <$> (ellipses *> fragmentName) <*> (optionMa
 
 inlineFragment :: Parser String AST.InlineFragment
 inlineFragment = fix (\parser -> 
-  AST.InlineFragment <$> (ellipses *> (optionMaybe typeCondition)) <*> directives <*> selectionSet)
+  AST.InlineFragment <$> (ellipses *> (optionMaybe typeCondition)) <*> (optionMaybe directives) <*> selectionSet)
 
 fragmentName :: Parser String AST.FragmentName
 fragmentName = AST.FragmentName <$> notNameMatcher ["on"]

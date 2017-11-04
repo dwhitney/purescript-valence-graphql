@@ -3,7 +3,7 @@ module Valence.Query.AST where
 import Prelude
 
 import Data.Foldable (foldMap)
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.NonEmpty (NonEmpty)
 
 -- Misc typeclasses
@@ -27,14 +27,34 @@ data Selection
   | SelectionFragmentSpread FragmentSpread
   | SelectionInlineFragment InlineFragment
 
+instance showSelection :: Show Selection where
+  show (SelectionField field) = "(SelectionField " <> (show field) <> ")"
+  show (SelectionFragmentSpread spread) = "(SelectionFragmentSpread " <> (show spread) <> ")"
+  show (SelectionInlineFragment inline) = "(SelectionInlineFragment " <> (show inline) <> ")"
 
-type SelectionSet = NonEmpty Array Selection
 
-type OptionalSelectionSet = Array Selection
+newtype SelectionSet = SelectionSet (NonEmpty Array Selection)
+
+instance showSelectionSet :: Show SelectionSet where
+  show (SelectionSet set) = "(SelectionSet " <> (show set) <> ")"
 
 -- Fields
 
 data Field = Field (Maybe Alias) String (Maybe Arguments) (Maybe Directives) (Maybe SelectionSet)
+
+instance showField :: Show Field where
+  show (Field maybeAlias n maybeArguments maybeDirectives maybeSelectionSet) = 
+    "(Field " <> 
+      defaultWithSpace maybeAlias <>
+      n <> " " <>
+      defaultWithSpace maybeArguments <>
+      defaultWithSpace maybeDirectives <>
+      defaultWithSpace maybeSelectionSet <>
+      ")" 
+    where
+      defaultWithSpace :: ∀ a. Show a => (Maybe a) -> String
+      defaultWithSpace m = fromMaybe "" (m <#> (\a -> (show a) <> " "))
+
 
 newtype Alias = Alias String
 
@@ -74,8 +94,8 @@ instance queryStringArguments :: QueryString Arguments where
 data FragmentSpread = FragmentSpread FragmentName (Maybe Directives)
 
 instance showFragmentSpread :: Show FragmentSpread where
-  show (FragmentSpread (FragmentName n) (Just d)) = ""
-  show (FragmentSpread (FragmentName n) Nothing) = ""
+  show (FragmentSpread n (Just d)) = "(FragmentSpread " <> (show n) <> " " <> (show d) <> ")"
+  show (FragmentSpread n Nothing) = "FragmentSpread " <> (show n) <> ")"
 
 instance eqFragmentSpread :: Eq FragmentSpread where
   eq (FragmentSpread n1 d1) (FragmentSpread n2 d2) = (n1 == n2) && (d1 == d2)
@@ -95,7 +115,21 @@ instance eqFragmentName :: Eq FragmentName where
 instance queryStringFragmentName :: QueryString FragmentName where
   toQueryString (FragmentName n) = n
 
-data InlineFragment = InlineFragment (Maybe TypeCondition) Directives SelectionSet
+data InlineFragment = InlineFragment (Maybe TypeCondition) (Maybe Directives) SelectionSet
+
+instance showInlineFragment :: Show InlineFragment where
+  show (InlineFragment (Just tc) (Just d) ss) = "(InlineFragment" <> (show tc) <> " " <> (show d) <> " " <> (show ss) <> ")"
+  show (InlineFragment Nothing (Just d) ss) = "(InlineFragment" <> " " <> (show d) <> " " <> (show ss) <> ")"
+  show (InlineFragment (Just tc) Nothing ss) = "(InlineFragment" <> (show tc) <> (show ss) <> ")"
+  show (InlineFragment Nothing Nothing ss) = "(InlineFragment" <> (show ss) <> ")"
+
+{-
+instance showInlineFragment :: Show InlineFragment where
+  show (InlineFragment (Just tc)  (Just d) ss) = "(InlineFragment " <> (show tc) <> " " <> (show d) <> " " <> (show ss) <> ")"
+  show (InlineFragment Nothing    (Just d) ss) = "(InlineFragment " <> (show d) <> " " <> (show ss) <> ")"
+  show (InlineFragment (Just tc)  Nothing ss) =  "(InlineFragment " <> (show tc) <> " " <> (show ss) <> ")"
+  show (InlineFragment Nothing    Nothing ss) =  "(InlineFragment " <> (show ss) <> ")"
+-}
 
 -- Values
 
