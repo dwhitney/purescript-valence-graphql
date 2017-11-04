@@ -6,8 +6,9 @@ import Control.Monad.Eff (Eff)
 import Data.Array (drop, fromFoldable, fold, range, reverse)
 import Data.Char (fromCharCode)
 import Data.Either (Either(..), isLeft)
-import Data.Function (on)
+import Data.Int (round)
 import Data.List.Lazy (foldMap, (:), replicateM)
+import Data.Maybe (Maybe(..))
 import Data.NonEmpty (NonEmpty, (:|))
 import Data.String (singleton, toCharArray)
 import Data.String as S
@@ -19,9 +20,10 @@ import Test.Spec.Assertions (shouldEqual)
 import Test.Spec.QuickCheck (QCRunnerEffects, quickCheck, quickCheck')
 import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (run)
-import Text.Parsing.Parser (runParser)
-import Valence.Query.AST (ObjectField(..), Value(..))
-import Valence.Query.Parser (floatValue, intValue, name, punctuator, stringValue, value)
+import Text.Parsing.Parser (ParseError(..), runParser)
+import Text.Parsing.Parser.Pos (Position(Position))
+import Valence.Query.AST (Alias(Alias), Argument(Argument), Arguments(Arguments), DefaultValue(DefaultValue), Directive(Directive), Directives(Directives), FragmentName(FragmentName), FragmentSpread(FragmentSpread), GQLType(NamedType, ListType, NonNullType), NonNull(NonNullNamed, NonNullList), ObjectField(ObjectField), TypeCondition(TypeCondition), Value(NullValue, BooleanValue, ListValue, StringValue, ObjectValue, FloatValue, IntValue, EnumValue, Variable), toQueryString)
+import Valence.Query.Parser (alias, argument, arguments, defaultValue, directive, directives, floatValue, fragmentName, fragmentSpread, gqlType, intValue, name, punctuator, stringValue, typeCondition, value)
 
 complexQuery :: String
 complexQuery = """
@@ -104,7 +106,7 @@ integerPart :: Gen String
 integerPart = do
   s <- elements ('-' :| [])
   f <- elements ('1' :| (drop 2 numbers))
-  i <- chooseInt 0 10
+  i <- chooseInt 0 5 
   n <- replicateM i (elements numbersNEL)
   pure $ foldMap singleton (s : f : n)
 
@@ -113,7 +115,7 @@ instance arbitraryIntValue :: Arbitrary IntValueGen where
 
 fractionalPart :: Gen String
 fractionalPart = do
-  i <- chooseInt 1 10
+  i <- chooseInt 1 5 
   n <- replicateM i (elements numbersNEL) 
   pure $ ("." <> (foldMap singleton n))
 
@@ -121,7 +123,7 @@ exponentPart :: Gen String
 exponentPart = do
   e <- elements ("e" :| ["E"])
   s <- elements ("" :| ["-", "+"])
-  i <- chooseInt 1 6
+  i <- chooseInt 1 2
   n <- replicateM i (elements numbersNEL)
   pure $ (e <> s <> (foldMap singleton n))
 
@@ -135,7 +137,6 @@ integerFactional = do
   i <- integerPart
   f <- fractionalPart
   pure (i <> f)
-
 
 newtype IntegerExponent = IntegerExponent String
 
@@ -180,14 +181,14 @@ instance arbitraryValue :: Arbitrary ArbitraryValue where
     i <- chooseInt 0 8
     case i of
       0 -> Variable <$> nameGen
-      1 -> arbitrary <#> (\(IntValueGen i) -> IntValue (readInt 10 i))
+      1 -> arbitrary <#> (\(IntValueGen i) -> IntValue (round (readInt 10 i)))
       2 -> arbitrary <#> (\(FloatValueGen i) -> FloatValue (readFloat i))
       3 -> StringValue <$> genStringValue
       4 -> BooleanValue <$> arbitrary
       5 -> EnumValue <$> nameGen
       6 -> pure NullValue
       7 -> ListValue <$> (do
-        i <- chooseInt 0 10
+        i <- chooseInt 0 5 
         l <- (replicateM i arbitrary) <#> (\list -> map (\(ArbitraryValue v) -> v) (fromFoldable list))
         pure l)
       _ -> arbitrary <#> (\(FloatValueGen i) -> FloatValue (readFloat i))
@@ -195,9 +196,11 @@ instance arbitraryValue :: Arbitrary ArbitraryValue where
 escapedChar :: Gen String
 escapedChar = elements ("\\\"" :| ["\\\\", "\\/", "\\\\b", "\\\\f", "\\\n", "\\\r", "\\\t"])
 
+sourceCharButNotSomeArray :: NonEmpty Array String
+sourceCharButNotSomeArray = map (fromCharCode >>> singleton )  (32 :| ([33] <> (range 35 91) <> (range 93 65535)))
+
 sourceCharButNotSome :: Gen String
-sourceCharButNotSome = 
-  (singleton <<< fromCharCode) <$> (elements (32 :| ([33] <> (range 35 91) <> (range 93 65535))))
+sourceCharButNotSome = elements sourceCharButNotSomeArray
 
 escapedUnicode :: Gen String
 escapedUnicode = do
@@ -217,9 +220,109 @@ genStringValue = do
 instance arbitraryStringValue :: Arbitrary StringValueGen where
   arbitrary = genStringValue <#> (\str -> StringValueGen ( "\"" <> str <> "\""))
 
+newtype ArbitraryAlias = ArbitraryAlias Alias
+
+instance arbitraryAlias :: Arbitrary ArbitraryAlias where
+  arbitrary = do
+    n <- nameGen
+    pure (ArbitraryAlias (Alias n))
+
+newtype ArbitraryArgument = ArbitraryArgument Argument
+
+instance arbitraryArgument :: Arbitrary ArbitraryArgument where
+  arbitrary = do
+    n                   <- nameGen
+    (ArbitraryValue v)  <- arbitrary 
+    pure $ ArbitraryArgument (Argument n v)
+
+newtype ArbitraryArguments = ArbitraryArguments Arguments 
+
+instance arbitraryArguments :: Arbitrary ArbitraryArguments where
+  arbitrary = do
+    i     <- chooseInt 1 5 
+    args  <- (replicateM i arbitrary) <#> (\list -> map (\(ArbitraryArgument arg) -> arg) list)
+    pure (ArbitraryArguments (Arguments (fromFoldable args)))
+
+newtype ArbitraryDirective = ArbitraryDirective Directive
+
+instance arbitraryDirective :: Arbitrary ArbitraryDirective where
+  arbitrary = do
+    n                         <- nameGen
+    b                         <- arbitrary
+    case b of 
+      true -> do
+          (ArbitraryArguments args) <- arbitrary 
+          pure (ArbitraryDirective (Directive n (Just args)))
+      false -> pure (ArbitraryDirective (Directive n Nothing))
+
+newtype ArbitraryDirectives = ArbitraryDirectives Directives
+
+instance arbitraryDirectives :: Arbitrary ArbitraryDirectives where
+  arbitrary = do
+    (ArbitraryDirective d)  <- arbitrary
+    i                       <- chooseInt 0 5
+    ds                      <- replicateM i (arbitrary <#> (\(ArbitraryDirective d) -> d))
+    pure (ArbitraryDirectives (Directives (d :| (fromFoldable ds))))
+
+newtype ArbitraryGQLType = ArbitraryGQLType GQLType 
+newtype ArbitraryNonNull = ArbitraryNonNull NonNull
+
+instance arbitraryGQLType :: Arbitrary ArbitraryGQLType where
+  arbitrary = do
+    i <- chooseInt 0 2
+    ArbitraryGQLType <$> (case i of 
+      0 -> NamedType <$> nameGen  
+      1 -> ListType <$> (arbitrary <#> (\(ArbitraryGQLType t) -> t))
+      _ -> NonNullType <$> (arbitrary <#> (\(ArbitraryNonNull t) -> t))
+    ) 
+instance arbitraryNonNull :: Arbitrary ArbitraryNonNull where
+  arbitrary = do
+    i <- chooseInt 0 1
+    ArbitraryNonNull <$> (case i of 
+      0 -> NonNullNamed <$> nameGen 
+      _ -> NonNullList <$> (arbitrary <#> (\(ArbitraryGQLType t) -> t))
+    )
+
+newtype ArbitraryDefaultValue = ArbitraryDefaultValue DefaultValue
+
+instance arbitraryDefaultValue :: Arbitrary ArbitraryDefaultValue where
+  arbitrary = do
+    (ArbitraryValue v) <- arbitrary
+    pure (ArbitraryDefaultValue (DefaultValue v))
+
+newtype ArbitraryTypeCondition = ArbitraryTypeCondition TypeCondition 
+
+instance arbitraryTypeCondition :: Arbitrary ArbitraryTypeCondition where
+  arbitrary = do
+    n <- nameGen
+    pure (ArbitraryTypeCondition (TypeCondition n))
+
+newtype ArbitraryFragmentName = ArbitraryFragmentName FragmentName 
+
+instance arbitraryFragmentName :: Arbitrary ArbitraryFragmentName where
+  arbitrary = do
+    n <- nameGen
+    if n == "on"
+      then pure (ArbitraryFragmentName (FragmentName "onx"))
+      else pure (ArbitraryFragmentName (FragmentName n))
+
+newtype ArbitraryFragmentSpread = ArbitraryFragmentSpread FragmentSpread
+
+instance arbitraryFragmentSpread :: Arbitrary ArbitraryFragmentSpread where
+  arbitrary = do
+    (ArbitraryFragmentName n) <- arbitrary
+    b                         <- arbitrary
+    if b
+      then do
+        (ArbitraryDirectives d) <- arbitrary
+        pure (ArbitraryFragmentSpread (FragmentSpread n (Just d)))
+      else pure (ArbitraryFragmentSpread (FragmentSpread n Nothing))
+
 main :: Eff (QCRunnerEffects () ) Unit
 main = run [consoleReporter] do 
+
   describe "Valence.Query.Parser" do
+
     describe "NameGen" do
       it "the common case" do
         (runParser "asdf" name) `shouldEqual` (Right "asdf")
@@ -285,7 +388,7 @@ main = run [consoleReporter] do
         (runParser "$foo" value) `shouldEqual` (Right (Variable "foo"))
 
       it "parses IntValue" do
-        (runParser "10" value) `shouldEqual` (Right (IntValue (10.0)))
+        (runParser "10" value) `shouldEqual` (Right (IntValue (10 :: Int)))
 
       it "parses FloatValue" do
         (runParser "10.9" value) `shouldEqual` (Right (FloatValue (10.9)))
@@ -306,7 +409,7 @@ main = run [consoleReporter] do
         (runParser "null" value) `shouldEqual` (Right NullValue)
 
       it "parses ListValue" do
-        (runParser "[asdf true \"Hello, World!\", 10, 15.9]" value) `shouldEqual` (Right (ListValue [(EnumValue "asdf"), (BooleanValue true), (StringValue "Hello, World!"), (IntValue 10.0), (FloatValue 15.9) ]))
+        (runParser "[asdf true \"Hello, World!\", 10, 15.9]" value) `shouldEqual` (Right (ListValue [(EnumValue "asdf"), (BooleanValue true), (StringValue "Hello, World!"), (IntValue 10), (FloatValue 15.9) ]))
       
       it "parses an empty list" do 
         (runParser "[]" value) `shouldEqual` (Right (ListValue []))
@@ -319,8 +422,59 @@ main = run [consoleReporter] do
           ]
          ))
 
+    describe "Alias" do 
+      it "parses the common case" do
+        (runParser "alias:" alias) `shouldEqual` (Right (Alias "alias"))
+      it "parses with some ignored tokens" do
+        (runParser "alias,,,  :" alias) `shouldEqual` (Right (Alias "alias"))
+      it "passes quickCheck" do
+        quickCheck (\(ArbitraryAlias a @ (Alias n)) -> (runParser (toQueryString a) alias )=== (Right (Alias n)))
 
+    describe "Argument" do
+      it "passes quickCheck" do
+        quickCheck (\(ArbitraryArgument arg @ (Argument n v)) -> (runParser (toQueryString arg) argument) === (Right (Argument n v)))
 
+    describe "Arguments" do     
+      it "should fail on empty arguments" do 
+        (runParser "()" arguments) `shouldEqual` (Left (ParseError "empty list of arguments aren't allowed" (Position {line: 1, column: 3})))
+      it "passes quickCheck" do
+        quickCheck (\ arbArgs @ (ArbitraryArguments (Arguments args)) -> (runParser (toQueryString (Arguments args)) arguments) === (Right (Arguments args)))
+
+    describe "Directive" do
+      it "passes quickCheck" do
+        quickCheck (\(ArbitraryDirective d) -> (runParser (toQueryString d) directive) === (Right d))
+
+    describe "Directives" do
+      it "passes quickCheck" do
+        quickCheck (\(ArbitraryDirectives (Directives ds)) -> (runParser (toQueryString (Directives ds)) directives) === (Right (Directives ds)))
+
+    describe "GQLType" do
+      it "parses NamedType" do
+        (runParser "Dustin" gqlType) `shouldEqual` (Right (NamedType "Dustin")) 
+      it "parses NonNullType - NamedType" do
+        (runParser "Dustin!" gqlType) `shouldEqual` (Right (NonNullType (NonNullNamed "Dustin")))
+      it "parse ListType" do
+        (runParser "[Dustin]" gqlType) `shouldEqual` (Right (ListType (NamedType "Dustin")))
+      it "passes quickCheck" do
+       quickCheck (\(ArbitraryGQLType t) -> (runParser (toQueryString t) gqlType) === (Right t))
+
+    describe "DefaultValue" do
+      it "passes quickCheck" do
+       quickCheck (\(ArbitraryDefaultValue d) -> (runParser (toQueryString d) defaultValue) === (Right d))
+
+    describe "TypeCondition" do
+      it "passes quickCheck" do
+       quickCheck (\(ArbitraryTypeCondition t) -> (runParser (toQueryString t) typeCondition) === (Right t))
+
+    describe "FragmentName" do
+      it "fails on 'on'" do
+        (runParser "on" fragmentName) `shouldEqual` (Left (ParseError "Did not expect to find 'on'" (Position {line: 1, column: 3})))
+      it "passes quickCheck" do
+       quickCheck (\(ArbitraryFragmentName t) -> (runParser (toQueryString t) fragmentName) === (Right t))
+
+    describe "FragmentSpread" do
+      it "passes quickCheck" do
+       quickCheck (\(ArbitraryFragmentSpread t) -> (runParser (toQueryString t) fragmentSpread) === (Right t))
 
 strReverse :: String -> String
 strReverse str = foldMap singleton (reverse $ toCharArray str)

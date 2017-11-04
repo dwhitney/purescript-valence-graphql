@@ -4,6 +4,7 @@ import Control.Alt ((<|>))
 import Control.Lazy (fix)
 import Data.Array (elem, fold, many)
 import Data.Foldable (foldMap)
+import Data.Int (round)
 import Data.Maybe (Maybe(..))
 import Data.NonEmpty ((:|))
 import Data.String (fromCharArray, singleton)
@@ -13,6 +14,7 @@ import Text.Parsing.Parser (Parser, fail)
 import Text.Parsing.Parser.Combinators (between, lookAhead, manyTill, option, optionMaybe, skipMany, try)
 import Text.Parsing.Parser.String (char, eof, oneOf, satisfy, string)
 import Text.Parsing.Parser.Token (alphaNum, digit, letter)
+import Valence.Query.AST (Arguments(..))
 import Valence.Query.AST as AST
 
 
@@ -31,8 +33,8 @@ definition :: Parser String AST.Definition
 definition = operation <|> fragment
   where
     operation = simpleOperation <|> normalOperation
-    simpleOperation = selectionSet <#> (\set -> (AST.Operation AST.Query Nothing Nothing [] set))
-    normalOperation = AST.Operation <$> operationType <*> (optionMaybe name) <*> (optionMaybe variableDefinitions) <*> directives <*> selectionSet
+    simpleOperation = selectionSet <#> (\set -> (AST.Operation AST.Query Nothing Nothing Nothing set))
+    normalOperation = AST.Operation <$> operationType <*> (optionMaybe name) <*> (optionMaybe variableDefinitions) <*> (optionMaybe directives) <*> selectionSet
     operationType = (AST.Query <$ (nameMatcher "query")) <|> (AST.Mutation <$ (nameMatcher "mutation"))
     fragment = do
       _   <- nameMatcher "fragment"
@@ -69,7 +71,9 @@ alias :: Parser String AST.Alias
 alias = AST.Alias <$> name <* colon
 
 arguments :: Parser String AST.Arguments
-arguments = between lParen rParen (many argument)
+arguments = Arguments <$> (between lParen rParen (many argument)) >>= (\(Arguments args) -> case args of
+  [] -> fail "empty list of arguments aren't allowed"
+  _  -> pure $ Arguments args)
 
 argument :: Parser String AST.Argument
 argument = do
@@ -90,7 +94,7 @@ value = fix (\parser ->
     try (listValue parser)  <|>
     try (objectValue parser))
   where
-    iValue                = AST.IntValue      <$> (intValue <#> readInt 10)
+    iValue                = AST.IntValue      <$> (intValue <#> (\str -> round $ (readInt 10 str)))
     fValue                = AST.FloatValue    <$> (floatValue <#> readFloat)
     sValue                = AST.StringValue   <$> stringValue
     booleanValue          = AST.BooleanValue  <$> (try (nameMatcher "true" $> true) <|> try (nameMatcher "false" $> false))
@@ -105,7 +109,7 @@ variableStr :: Parser String String
 variableStr = dollarSign *> name
 
 fragmentSpread :: Parser String AST.FragmentSpread
-fragmentSpread = AST.FragmentSpread <$> (ellipses *> fragmentName) <*> directives
+fragmentSpread = AST.FragmentSpread <$> (ellipses *> fragmentName) <*> (optionMaybe directives)
 
 inlineFragment :: Parser String AST.InlineFragment
 inlineFragment = fix (\parser -> 
@@ -118,10 +122,13 @@ typeCondition :: Parser String AST.TypeCondition
 typeCondition = AST.TypeCondition <$> ((nameMatcher "on") *> name)
 
 directives :: Parser String AST.Directives
-directives = many directive
+directives = do 
+  d   <- directive
+  ds  <- many directive
+  pure (AST.Directives (d :| ds))
 
 directive :: Parser String AST.Directive
-directive = AST.Directive <$> (at *> name) <*> arguments
+directive = AST.Directive <$> (at *> name) <*> (optionMaybe arguments)
 
 variableDefinition :: Parser String AST.VariableDefinition
 variableDefinition = AST.VariableDefinition <$> (dollarSign *> name <* colon) <*>  gqlType <*> (optionMaybe defaultValue)
@@ -136,13 +143,13 @@ defaultValue :: Parser String AST.DefaultValue
 defaultValue = AST.DefaultValue <$> (equals *> value)
 
 gqlType :: Parser String AST.GQLType
-gqlType = fix (\parser ->  namedType <|> listType parser <|> nonNullType parser)
+gqlType = fix (\parser -> (try (nonNullType parser)) <|> (try (listType parser)) <|> (try namedType))
   where
     namedType = AST.NamedType <$> name
-    listType parser = between lBracket rBracket gqlType
-    nonNullType parser = AST.NonNullType <$> (nonNullNamed <|> nonNullList parser)
+    listType parser = AST.ListType <$> (between lBracket rBracket parser)
+    nonNullType parser = AST.NonNullType <$> (nonNullNamed <|> (nonNullList parser))
     nonNullNamed = AST.NonNullNamed <$> (name <* exclamation)
-    nonNullList parser = AST.NonNullList <$> ((listType parser) <* exclamation)
+    nonNullList parser = AST.NonNullList <$> ((between lBracket rBracket parser) <* exclamation)
 
 nameMatcher :: String -> Parser String String 
 nameMatcher str = name >>= (\n -> 
@@ -192,8 +199,7 @@ integerPart = ((try negativeZero) <|> (try normalInt))
 floatValue :: TokenParser
 floatValue = lexicalToken floatParser
   where
-    floatParser       = (try intFracExp) <|> (try intExp) <|> (try intFrac)
-    
+    floatParser       = (try intFracExp) <|> (try intFrac) <|> (try intExp) 
     intFracExp        = integerPart <> fractionalPart <> exponentPart 
     intExp            = integerPart <> exponentPart
     intFrac           = integerPart <> fractionalPart 
