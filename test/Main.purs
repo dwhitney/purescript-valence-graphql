@@ -12,6 +12,7 @@ import Data.Maybe (Maybe(..))
 import Data.NonEmpty (NonEmpty, (:|))
 import Data.String (singleton, toCharArray)
 import Data.String as S
+import Debug.Trace (spy)
 import Global (readInt, readFloat)
 import Test.QuickCheck (class Arbitrary, arbitrary, (===))
 import Test.QuickCheck.Gen (Gen, chooseInt, elements)
@@ -22,8 +23,8 @@ import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (run)
 import Text.Parsing.Parser (ParseError(..), runParser)
 import Text.Parsing.Parser.Pos (Position(Position))
-import Valence.Query.AST (Alias(Alias), Argument(Argument), Arguments(Arguments), DefaultValue(DefaultValue), Directive(Directive), Directives(Directives), FragmentName(FragmentName), FragmentSpread(FragmentSpread), GQLType(NamedType, ListType, NonNullType), NonNull(NonNullNamed, NonNullList), ObjectField(ObjectField), TypeCondition(TypeCondition), Value(NullValue, BooleanValue, ListValue, StringValue, ObjectValue, FloatValue, IntValue, EnumValue, Variable), toQueryString)
-import Valence.Query.Parser (alias, argument, arguments, defaultValue, directive, directives, floatValue, fragmentName, fragmentSpread, gqlType, intValue, name, punctuator, stringValue, typeCondition, value)
+import Valence.Query.AST (Alias(Alias), Argument(Argument), Arguments(Arguments), DefaultValue(DefaultValue), Definition, Directive(Directive), Directives(Directives), Field(..), FragmentName(FragmentName), FragmentSpread(FragmentSpread), GQLType(NamedType, ListType, NonNullType), InlineFragment(..), NonNull(NonNullNamed, NonNullList), ObjectField(ObjectField), OperationType(..), Selection(..), SelectionSet(..), TypeCondition(TypeCondition), Value(NullValue, BooleanValue, ListValue, StringValue, ObjectValue, FloatValue, IntValue, EnumValue, Variable), VariableDefinition(..), VariableDefinitions(..), toQueryString)
+import Valence.Query.Parser (alias, argument, arguments, defaultValue, directive, directives, field, floatValue, fragmentName, fragmentSpread, gqlType, inlineFragment, intValue, name, punctuator, selection, selectionSet, stringValue, typeCondition, value, variableDefinition, variableDefinitions)
 
 complexQuery :: String
 complexQuery = """
@@ -82,7 +83,7 @@ newtype NameGen = NameGen String
 nameGen :: Gen String
 nameGen = do
   h     <- nameFirstElements
-  i     <- chooseInt 0 100
+  i     <- chooseInt 0 25 
   t     <- replicateM i nameTailElements
   pure $ (foldMap singleton (h : t))
 
@@ -106,7 +107,7 @@ integerPart :: Gen String
 integerPart = do
   s <- elements ('-' :| [])
   f <- elements ('1' :| (drop 2 numbers))
-  i <- chooseInt 0 5 
+  i <- chooseInt 0 3 
   n <- replicateM i (elements numbersNEL)
   pure $ foldMap singleton (s : f : n)
 
@@ -115,7 +116,7 @@ instance arbitraryIntValue :: Arbitrary IntValueGen where
 
 fractionalPart :: Gen String
 fractionalPart = do
-  i <- chooseInt 1 5 
+  i <- chooseInt 1 3 
   n <- replicateM i (elements numbersNEL) 
   pure $ ("." <> (foldMap singleton n))
 
@@ -188,7 +189,7 @@ instance arbitraryValue :: Arbitrary ArbitraryValue where
       5 -> EnumValue <$> nameGen
       6 -> pure NullValue
       7 -> ListValue <$> (do
-        i <- chooseInt 0 5 
+        i <- chooseInt 0 2 
         l <- (replicateM i arbitrary) <#> (\list -> map (\(ArbitraryValue v) -> v) (fromFoldable list))
         pure l)
       _ -> arbitrary <#> (\(FloatValueGen i) -> FloatValue (readFloat i))
@@ -209,7 +210,7 @@ escapedUnicode = do
 
 genStringValue :: Gen String
 genStringValue = do
-    i <- chooseInt 1 50
+    i <- chooseInt 1 20
     c <- chooseInt 0 2
     s <- replicateM i (case c of
           0 -> escapedChar 
@@ -239,7 +240,7 @@ newtype ArbitraryArguments = ArbitraryArguments Arguments
 
 instance arbitraryArguments :: Arbitrary ArbitraryArguments where
   arbitrary = do
-    i     <- chooseInt 1 5 
+    i     <- chooseInt 1 3 
     args  <- (replicateM i arbitrary) <#> (\list -> map (\(ArbitraryArgument arg) -> arg) list)
     pure (ArbitraryArguments (Arguments (fromFoldable args)))
 
@@ -260,7 +261,7 @@ newtype ArbitraryDirectives = ArbitraryDirectives Directives
 instance arbitraryDirectives :: Arbitrary ArbitraryDirectives where
   arbitrary = do
     (ArbitraryDirective d)  <- arbitrary
-    i                       <- chooseInt 0 5
+    i                       <- chooseInt 0 2
     ds                      <- replicateM i (arbitrary <#> (\(ArbitraryDirective d) -> d))
     pure (ArbitraryDirectives (Directives (d :| (fromFoldable ds))))
 
@@ -318,11 +319,86 @@ instance arbitraryFragmentSpread :: Arbitrary ArbitraryFragmentSpread where
         pure (ArbitraryFragmentSpread (FragmentSpread n (Just d)))
       else pure (ArbitraryFragmentSpread (FragmentSpread n Nothing))
 
+newtype ArbitraryField = ArbitraryField Field
+
+instance arbitraryField :: Arbitrary ArbitraryField where
+  arbitrary = do
+    maybeAlias        <- arbitrary >>= (if _ then (arbitrary <#> (\(ArbitraryAlias alias) -> Just alias)) else pure Nothing)  
+    maybeArgs         <- arbitrary >>= (if _ then (arbitrary <#> (\(ArbitraryArguments args) -> Just args)) else pure Nothing)  
+    maybeDirectives   <- arbitrary >>= (if _ then (arbitrary <#> (\(ArbitraryDirectives dirs) -> Just dirs)) else pure Nothing)  
+    maybeSelectionSet <- arbitrary >>= (if _ then (arbitrary <#> (\(ArbitrarySelectionSet ss) -> Just ss)) else pure Nothing)  
+    n                 <- nameGen
+    pure (ArbitraryField (Field maybeAlias n maybeArgs maybeDirectives maybeSelectionSet))
+
+newtype ArbitrarySelection = ArbitrarySelection Selection
+
+instance arbitrarySelection :: Arbitrary ArbitrarySelection where
+  arbitrary = do
+    i <- chooseInt 0 2
+    case i of 
+      0 -> arbitrary <#> (\(ArbitraryField field) -> ArbitrarySelection (SelectionField field))
+      1 -> arbitrary <#> (\(ArbitraryFragmentSpread spread) -> ArbitrarySelection (SelectionFragmentSpread spread))
+      _ -> arbitrary <#> (\(ArbitraryInlineFragment inline) -> ArbitrarySelection (SelectionInlineFragment inline))
+
+newtype ArbitrarySelectionSet = ArbitrarySelectionSet SelectionSet 
+
+instance arbitrarySelectionSet :: Arbitrary ArbitrarySelectionSet where
+  arbitrary = do
+    (ArbitrarySelection s)  <- arbitrary
+    i                       <- chooseInt 0 2
+    ss                      <- replicateM i (arbitrary <#> (\(ArbitrarySelection sel) -> sel))
+    pure (ArbitrarySelectionSet (SelectionSet (s :| (fromFoldable ss))))
+
+
+newtype ArbitraryInlineFragment = ArbitraryInlineFragment InlineFragment
+
+instance arbitraryInlineFragment :: Arbitrary ArbitraryInlineFragment where
+  arbitrary = do
+    tc                          <- arbitrary >>= if _
+                                                  then (arbitrary <#> (\(ArbitraryTypeCondition tc) -> Just tc))
+                                                  else pure Nothing
+    d                           <- arbitrary >>= if _ 
+                                                  then (arbitrary <#> (\(ArbitraryDirectives d) -> Just d))
+                                                  else pure Nothing
+    (ArbitrarySelectionSet ss)  <- arbitrary
+    pure (ArbitraryInlineFragment (InlineFragment tc d ss))
+
+newtype ArbitraryVariableDefinition = ArbitraryVariableDefinition VariableDefinition
+
+instance arbitraryVariableDefinition :: Arbitrary ArbitraryVariableDefinition where
+  arbitrary = do
+    n <- nameGen
+    (ArbitraryGQLType t) <- arbitrary
+    d                     <- arbitrary >>= (if _ then arbitrary <#> (\(ArbitraryDefaultValue v) -> Just v) else pure Nothing) 
+    pure (ArbitraryVariableDefinition (VariableDefinition n t d))
+
+newtype ArbitraryVariableDefinitions = ArbitraryVariableDefinitions VariableDefinitions
+
+instance arbitraryVariableDefinitions :: Arbitrary ArbitraryVariableDefinitions where
+  arbitrary = do
+    (ArbitraryVariableDefinition v) <- arbitrary
+    i                               <- chooseInt 0 2
+    vs                              <- (replicateM i arbitrary) <#> (\list -> map (\(ArbitraryVariableDefinition d) -> d) (fromFoldable list))
+    pure (ArbitraryVariableDefinitions (VariableDefinitions (v :| vs)))
+
+newtype ArbitraryDefinition = ArbitraryDefinition Definition 
+
+{-}
+instance arbitraryDefinition :: Arbitrary ArbitraryDefinition where
+  arbitrary = ArbitraryDefinition <$> (arbitrary >>= 
+    if _ then arbitrary <#> (\(ArbitrarySelectionSet set) -> Operation Query Nothing Nothing Nothing set)
+    else do
+      q   <- arbitrary <#> if _ then Query else Mutation
+      n   <- arbitrary >>= if 
+    
+  ) 
+-}
+
 main :: Eff (QCRunnerEffects () ) Unit
 main = run [consoleReporter] do 
 
   describe "Valence.Query.Parser" do
-
+{-
     describe "NameGen" do
       it "the common case" do
         (runParser "asdf" name) `shouldEqual` (Right "asdf")
@@ -475,6 +551,36 @@ main = run [consoleReporter] do
     describe "FragmentSpread" do
       it "passes quickCheck" do
        quickCheck (\(ArbitraryFragmentSpread t) -> (runParser (toQueryString t) fragmentSpread) === (Right t))
+
+    describe "Field" do 
+      it "passes quickCheck" do
+        quickCheck (\(ArbitraryField f ) -> (runParser (toQueryString f) field) === (Right f))
+
+
+    describe "Selection" do
+      it "passes quickCheck" do
+        quickCheck (\(ArbitrarySelection s) -> (runParser (toQueryString s) selection) === (Right s))
+
+-}
+    describe "SelectionSet" do
+      it "passes quickCheck" do
+        quickCheck (\(ArbitrarySelectionSet s) -> (runParser (toQueryString s) selectionSet) === (Right s))
+
+    describe "InlineFragment" do
+      it "passes quickCheck" do
+        quickCheck (\(ArbitraryInlineFragment f) -> (runParser (toQueryString f) inlineFragment) === (Right f))
+
+    describe "VariableDefinition" do
+      it "passes quickCheck" do
+        quickCheck (\(ArbitraryVariableDefinition d) -> (runParser (toQueryString d) variableDefinition) === (Right d))
+
+    describe "VariableDefinitions" do
+      it "passes quickCheck" do
+        quickCheck (\(ArbitraryVariableDefinitions ds) -> (runParser (toQueryString ds) variableDefinitions) === (Right ds))
+
+
+
+
 
 strReverse :: String -> String
 strReverse str = foldMap singleton (reverse $ toCharArray str)

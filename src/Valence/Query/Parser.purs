@@ -14,7 +14,7 @@ import Text.Parsing.Parser (Parser, fail)
 import Text.Parsing.Parser.Combinators (between, lookAhead, manyTill, option, optionMaybe, skipMany, try)
 import Text.Parsing.Parser.String (char, eof, oneOf, satisfy, string)
 import Text.Parsing.Parser.Token (alphaNum, digit, letter)
-import Valence.Query.AST (Arguments(..))
+import Valence.Query.AST (Arguments(..), VariableDefinitions(..))
 import Valence.Query.AST as AST
 
 
@@ -22,12 +22,11 @@ import Valence.Query.AST as AST
 
 document :: Parser String AST.Document
 document = AST.Document <$> definitions
-
-definitions :: Parser String AST.Definitions
-definitions = do
-  d   <- definition
-  ds  <- many definition
-  pure $ (d :| ds)
+  where
+    definitions = do
+      d   <- definition
+      ds  <- many definition
+      pure $ (d :| ds)
 
 definition :: Parser String AST.Definition
 definition = operation <|> fragment
@@ -40,7 +39,7 @@ definition = operation <|> fragment
       _   <- nameMatcher "fragment"
       fn  <- fragmentName
       tc  <- typeCondition
-      ds  <- directives
+      ds  <- (optionMaybe directives)
       ss  <- selectionSet    
       pure (AST.Fragment fn tc ds ss)
 
@@ -51,18 +50,19 @@ selectionSet = fix (\parser -> between lCurlyBracket rCurlyBracket (do
   pure $ AST.SelectionSet (s :| ss)))
 
 selection :: Parser String AST.Selection
-selection = fix (\parser -> selectionField parser <|> selectionFragmentSpread <|> (selectionInlineFragment parser))
+selection = fix (\parser -> (try (selectionField parser)) <|> (try selectionFragmentSpread) <|> (try (selectionInlineFragment parser)))
   where
-    selectionField parser = AST.SelectionField <$> field parser
+    selectionField parser = AST.SelectionField <$> field 
     selectionFragmentSpread = AST.SelectionFragmentSpread <$> fragmentSpread 
     selectionInlineFragment parser = AST.SelectionInlineFragment <$> inlineFragment 
-    field parser = AST.Field <$> 
+
+field :: Parser String AST.Field
+field = fix (\parser -> AST.Field <$> 
                     (optionMaybe (try alias)) <*> 
                     name <*> 
                     (optionMaybe ( arguments)) <*> 
                     (optionMaybe ( directives)) <*> 
-                    (optionMaybe ( selectionSet))
-
+                    (optionMaybe ( selectionSet)))
 
 alias :: Parser String AST.Alias
 alias = AST.Alias <$> name <* colon
@@ -134,7 +134,7 @@ variableDefinitions :: Parser String AST.VariableDefinitions
 variableDefinitions = between lParen rParen do
   v <- variableDefinition
   vs <- many variableDefinition
-  pure (v :| vs)
+  pure (VariableDefinitions (v :| vs))
 
 defaultValue :: Parser String AST.DefaultValue
 defaultValue = AST.DefaultValue <$> (equals *> value)

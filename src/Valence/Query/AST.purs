@@ -2,7 +2,7 @@ module Valence.Query.AST where
 
 import Prelude
 
-import Data.Foldable (foldMap)
+import Data.Foldable (fold, foldMap)
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.NonEmpty (NonEmpty)
 
@@ -12,15 +12,54 @@ class QueryString a where
 
 -- Top Level
 
-newtype Document = Document Definitions
+newtype Document = Document (NonEmpty Array Definition) 
 
-type Definitions = NonEmpty Array Definition
+instance showDocument :: Show Document where
+  show (Document defs) = "(Document " <> show defs <> ")"
+
+instance eqDocument :: Eq Document where
+  eq (Document defs1) (Document defs2) = defs1 == defs2
+
+instance queryStringDocument :: QueryString Document where
+  toQueryString (Document defs) = foldMap (\def -> toQueryString def <> " ") defs
 
 data Definition 
   = Operation OperationType (Maybe String) (Maybe VariableDefinitions) (Maybe Directives) SelectionSet
-  | Fragment FragmentName TypeCondition Directives SelectionSet
+  | Fragment FragmentName TypeCondition (Maybe Directives) SelectionSet
+
+instance showDefinition :: Show Definition where
+  show (Operation opType maybeName maybeVariableDefinitions maybeDirectives ss) = 
+    "(Operation " <> showWithSpace maybeName <> showWithSpace maybeVariableDefinitions <> showWithSpace maybeDirectives <> show ss <> ")"
+  show (Fragment fn tc dir ss) = 
+    "(Fragment " <> show fn <> " " <> show tc <> " " <> show dir <> " " <> show ss <> ")"
+
+instance eqDefinition :: Eq Definition where
+  eq (Operation o1 n1 vd1 d1 ss1) (Operation o2 n2 vd2 d2 ss2) =
+    (o1 == o2) && (n1 == n2) && (vd1 == vd2) && (d1 == d2) && (ss1 == ss2)
+  eq (Fragment fn1 tc1 dir1 ss1) (Fragment fn2 tc2 dir2 ss2) = 
+    (fn1 == fn2) && (tc1 == tc2) && (dir1 == dir2) && (ss1 == ss2)   
+  eq _ _ = false
+
+instance queryStringDefinition :: QueryString Definition where
+  toQueryString (Operation opType maybeName maybeVariableDefinitions maybeDirectives ss) = 
+    toQueryString opType <> " " <> (fromMaybe "" maybeName) <> " " <> queryStringWithSpace maybeVariableDefinitions <> toQueryString ss
+  toQueryString (Fragment fn tc maybeDir ss) = 
+    "fragment " <> toQueryString fn <> " " <> queryStringWithSpace maybeDir <> " " <> toQueryString ss
 
 data OperationType = Query | Mutation
+
+instance showOperationType :: Show OperationType where
+  show Query = "Query"
+  show Mutation = "Mutation"
+
+instance eqOperationType :: Eq OperationType where
+  eq Query Query = true
+  eq Mutation Mutation = true
+  eq _ _ = false
+
+instance queryStringOperationType :: QueryString OperationType where
+  toQueryString Query = "query"
+  toQueryString Mutation = "mutation"
 
 data Selection
   = SelectionField Field
@@ -32,11 +71,27 @@ instance showSelection :: Show Selection where
   show (SelectionFragmentSpread spread) = "(SelectionFragmentSpread " <> (show spread) <> ")"
   show (SelectionInlineFragment inline) = "(SelectionInlineFragment " <> (show inline) <> ")"
 
+instance eqSelection :: Eq Selection where
+  eq (SelectionField field1) (SelectionField field2) = field1 == field2
+  eq (SelectionFragmentSpread spread1) (SelectionFragmentSpread spread2) = spread1 == spread2 
+  eq (SelectionInlineFragment inline1) (SelectionInlineFragment inline2) = inline1 == inline2 
+  eq _ _ = false
+
+instance queryStringSelection :: QueryString Selection where
+  toQueryString (SelectionField field) = toQueryString field
+  toQueryString (SelectionFragmentSpread spread) = toQueryString spread
+  toQueryString (SelectionInlineFragment inline) = toQueryString inline
 
 newtype SelectionSet = SelectionSet (NonEmpty Array Selection)
 
 instance showSelectionSet :: Show SelectionSet where
   show (SelectionSet set) = "(SelectionSet " <> (show set) <> ")"
+
+instance eqSelectionSet :: Eq SelectionSet where
+  eq (SelectionSet set1)  (SelectionSet set2) = set1 == set2
+
+instance queryStringSelectionSet :: QueryString SelectionSet where
+  toQueryString (SelectionSet set) = "{" <> (foldMap (\s -> (toQueryString s) <> " ") set) <> "}"
 
 -- Fields
 
@@ -45,16 +100,32 @@ data Field = Field (Maybe Alias) String (Maybe Arguments) (Maybe Directives) (Ma
 instance showField :: Show Field where
   show (Field maybeAlias n maybeArguments maybeDirectives maybeSelectionSet) = 
     "(Field " <> 
-      defaultWithSpace maybeAlias <>
+      showWithSpace maybeAlias <>
       n <> " " <>
-      defaultWithSpace maybeArguments <>
-      defaultWithSpace maybeDirectives <>
-      defaultWithSpace maybeSelectionSet <>
+      showWithSpace maybeArguments <>
+      showWithSpace maybeDirectives <>
+      showWithSpace maybeSelectionSet <>
       ")" 
-    where
-      defaultWithSpace :: ∀ a. Show a => (Maybe a) -> String
-      defaultWithSpace m = fromMaybe "" (m <#> (\a -> (show a) <> " "))
 
+showWithSpace :: ∀ a. Show a => (Maybe a) -> String
+showWithSpace m = fromMaybe "" (m <#> (\a -> (show a) <> " "))
+
+queryStringWithSpace :: ∀ a. QueryString a => (Maybe a) -> String
+queryStringWithSpace m = fromMaybe "" (m <#> (\a -> (toQueryString a) <> " "))
+
+instance eqField :: Eq Field where
+  eq (Field alias1 name1 args1 directives1 selectionSet1) (Field alias2 name2 args2 directives2 selectionSet2) = 
+    (alias1 == alias2) && (name1 == name2) && (args1 == args2) && (directives1 == directives2) && (selectionSet1 == selectionSet2)
+
+instance queryStringField :: QueryString Field where
+  toQueryString (Field aliasOpt n argsOpt directivesOpt selectionSetOpt) = 
+    fold [
+      queryStringWithSpace aliasOpt
+     , (n <> " ")
+     , queryStringWithSpace argsOpt
+     , queryStringWithSpace directivesOpt
+     , queryStringWithSpace selectionSetOpt
+    ]
 
 newtype Alias = Alias String
 
@@ -123,13 +194,13 @@ instance showInlineFragment :: Show InlineFragment where
   show (InlineFragment (Just tc) Nothing ss) = "(InlineFragment" <> (show tc) <> (show ss) <> ")"
   show (InlineFragment Nothing Nothing ss) = "(InlineFragment" <> (show ss) <> ")"
 
-{-
-instance showInlineFragment :: Show InlineFragment where
-  show (InlineFragment (Just tc)  (Just d) ss) = "(InlineFragment " <> (show tc) <> " " <> (show d) <> " " <> (show ss) <> ")"
-  show (InlineFragment Nothing    (Just d) ss) = "(InlineFragment " <> (show d) <> " " <> (show ss) <> ")"
-  show (InlineFragment (Just tc)  Nothing ss) =  "(InlineFragment " <> (show tc) <> " " <> (show ss) <> ")"
-  show (InlineFragment Nothing    Nothing ss) =  "(InlineFragment " <> (show ss) <> ")"
--}
+instance eqInlineFragment :: Eq InlineFragment where
+  eq (InlineFragment tc1 d1 ss1) (InlineFragment tc2 d2 ss2) =
+    (tc1 == tc2) && (d1 == d2) && (ss1 == ss2)
+
+instance queryStringInlineFragment :: QueryString InlineFragment where
+  toQueryString (InlineFragment tc d ss) = 
+    "... " <> (queryStringWithSpace tc) <> (queryStringWithSpace d) <> (toQueryString ss)
 
 -- Values
 
@@ -248,7 +319,26 @@ instance queryStringTypeCondition :: QueryString TypeCondition where
 
 data VariableDefinition = VariableDefinition String GQLType (Maybe DefaultValue)
 
-type VariableDefinitions = NonEmpty Array VariableDefinition
+instance showVariableDefinition :: Show VariableDefinition where
+  show (VariableDefinition n t md) = 
+    "(VariableDefinition " <> n <> (show t) <> showWithSpace md <> ")"
+
+instance eqVariableDefinition :: Eq VariableDefinition where
+  eq (VariableDefinition n1 t1 d1) (VariableDefinition n2 t2 d2) = (n1 == n2) && (t1 == t2) && (d1 == d2)
+
+instance queryStringVariableDefinition :: QueryString VariableDefinition where
+  toQueryString (VariableDefinition n t md) = "$" <> n <> ": " <> toQueryString t <> " " <> queryStringWithSpace md
+
+newtype VariableDefinitions = VariableDefinitions (NonEmpty Array VariableDefinition)
+
+instance showVariableDefinitions :: Show VariableDefinitions where
+  show (VariableDefinitions v) = "(VariableDefinitions " <> show v <> ")"
+
+instance eqVariableDefinitions :: Eq VariableDefinitions where
+  eq (VariableDefinitions v1) (VariableDefinitions v2) = v1 == v2
+
+instance queryStringVariableDefinitions :: QueryString VariableDefinitions where
+  toQueryString (VariableDefinitions vs) = "(" <> (foldMap (\v -> toQueryString v <> " ") vs) <> ")"
 
 newtype DefaultValue = DefaultValue Value
 
