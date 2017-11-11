@@ -42,9 +42,9 @@ instance eqDefinition :: Eq Definition where
 
 instance queryStringDefinition :: QueryString Definition where
   toQueryString (Operation opType maybeName maybeVariableDefinitions maybeDirectives ss) = 
-    toQueryString opType <> " " <> (fromMaybe "" maybeName) <> " " <> queryStringWithSpace maybeVariableDefinitions <> toQueryString ss
+    toQueryString opType <> " " <> (fromMaybe "" maybeName) <> " " <> queryStringWithSpace maybeVariableDefinitions <> queryStringWithSpace maybeDirectives <> toQueryString ss
   toQueryString (Fragment fn tc maybeDir ss) = 
-    "fragment " <> toQueryString fn <> " " <> queryStringWithSpace maybeDir <> " " <> toQueryString ss
+    "fragment " <> toQueryString fn <> " " <> toQueryString tc <> " " <> queryStringWithSpace maybeDir <> " " <> toQueryString ss
 
 data OperationType = Query | Mutation
 

@@ -24,17 +24,19 @@ document :: Parser String AST.Document
 document = AST.Document <$> definitions
   where
     definitions = do
+      _   <- skipMany ignoredTokens
       d   <- definition
       ds  <- many definition
+      _   <- eof
       pure $ (d :| ds)
 
 definition :: Parser String AST.Definition
-definition = operation <|> fragment
+definition = (try operation) <|> (try fragment)
   where
-    operation = simpleOperation <|> normalOperation
+    operation = (try simpleOperation) <|> (try normalOperation)
     simpleOperation = selectionSet <#> (\set -> (AST.Operation AST.Query Nothing Nothing Nothing set))
     normalOperation = AST.Operation <$> operationType <*> (optionMaybe name) <*> (optionMaybe variableDefinitions) <*> (optionMaybe directives) <*> selectionSet
-    operationType = (AST.Query <$ (nameMatcher "query")) <|> (AST.Mutation <$ (nameMatcher "mutation"))
+    operationType = (AST.Query <$ (try $ nameMatcher "query")) <|> (AST.Mutation <$ (try $ nameMatcher "mutation"))
     fragment = do
       _   <- nameMatcher "fragment"
       fn  <- fragmentName

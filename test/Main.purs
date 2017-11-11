@@ -23,11 +23,11 @@ import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (run)
 import Text.Parsing.Parser (ParseError(..), runParser)
 import Text.Parsing.Parser.Pos (Position(Position))
-import Valence.Query.AST (Alias(Alias), Argument(Argument), Arguments(Arguments), DefaultValue(DefaultValue), Definition, Directive(Directive), Directives(Directives), Field(..), FragmentName(FragmentName), FragmentSpread(FragmentSpread), GQLType(NamedType, ListType, NonNullType), InlineFragment(..), NonNull(NonNullNamed, NonNullList), ObjectField(ObjectField), OperationType(..), Selection(..), SelectionSet(..), TypeCondition(TypeCondition), Value(NullValue, BooleanValue, ListValue, StringValue, ObjectValue, FloatValue, IntValue, EnumValue, Variable), VariableDefinition(..), VariableDefinitions(..), toQueryString)
-import Valence.Query.Parser (alias, argument, arguments, defaultValue, directive, directives, field, floatValue, fragmentName, fragmentSpread, gqlType, inlineFragment, intValue, name, punctuator, selection, selectionSet, stringValue, typeCondition, value, variableDefinition, variableDefinitions)
+import Valence.Query.AST (Alias(Alias), Argument(Argument), Arguments(Arguments), DefaultValue(DefaultValue), Definition(..), Directive(Directive), Directives(Directives), Field(..), FragmentName(FragmentName), FragmentSpread(FragmentSpread), GQLType(NamedType, ListType, NonNullType), InlineFragment(..), NonNull(NonNullNamed, NonNullList), ObjectField(ObjectField), OperationType(..), Selection(..), SelectionSet(..), TypeCondition(TypeCondition), Value(NullValue, BooleanValue, ListValue, StringValue, ObjectValue, FloatValue, IntValue, EnumValue, Variable), VariableDefinition(..), VariableDefinitions(..), toQueryString)
+import Valence.Query.Parser (alias, argument, arguments, defaultValue, definition, directive, directives, document, field, floatValue, fragmentName, fragmentSpread, gqlType, inlineFragment, intValue, name, punctuator, selection, selectionSet, stringValue, typeCondition, value, variableDefinition, variableDefinitions)
 
-complexQuery :: String
-complexQuery = """
+kitchenSink :: String
+kitchenSink = """
 # test query
 query FetchLukeAndLeiaAliased($someVar: Int = 1.23,$anotherVar: Int = 123)@include(if: true) @include(if: false){
   luke: human(id: "1000")@include(if: true){
@@ -383,22 +383,29 @@ instance arbitraryVariableDefinitions :: Arbitrary ArbitraryVariableDefinitions 
 
 newtype ArbitraryDefinition = ArbitraryDefinition Definition 
 
-{-}
 instance arbitraryDefinition :: Arbitrary ArbitraryDefinition where
-  arbitrary = ArbitraryDefinition <$> (arbitrary >>= 
-    if _ then arbitrary <#> (\(ArbitrarySelectionSet set) -> Operation Query Nothing Nothing Nothing set)
-    else do
+  arbitrary = ArbitraryDefinition <$> (arbitrary >>= if _ 
+    then do
       q   <- arbitrary <#> if _ then Query else Mutation
-      n   <- arbitrary >>= if 
-    
+      n   <- arbitrary >>= if _ then Just <$> nameGen else pure Nothing
+      vd  <- arbitrary >>= if _ then Just <$> (arbitrary <#> (\(ArbitraryVariableDefinitions def) -> def)) else pure Nothing
+      d   <- arbitrary >>= if _ then Just <$> (arbitrary <#> (\(ArbitraryDirectives dir) -> dir)) else pure Nothing
+      ss  <- arbitrary <#> (\(ArbitrarySelectionSet set) -> set)
+      pure (Operation q n vd d ss)
+
+    else do
+      fn  <- arbitrary <#> (\(ArbitraryFragmentName n) -> n)
+      tc  <- arbitrary <#> (\(ArbitraryTypeCondition t) -> t)
+      d   <- arbitrary >>= if _ then Just <$> (arbitrary <#> (\(ArbitraryDirectives dir) -> dir)) else pure Nothing
+      ss  <- arbitrary <#> (\(ArbitrarySelectionSet set) -> set)
+      pure (Fragment fn tc d ss)
   ) 
--}
 
 main :: Eff (QCRunnerEffects () ) Unit
 main = run [consoleReporter] do 
 
   describe "Valence.Query.Parser" do
-{-
+{-}
     describe "NameGen" do
       it "the common case" do
         (runParser "asdf" name) `shouldEqual` (Right "asdf")
@@ -550,36 +557,42 @@ main = run [consoleReporter] do
 
     describe "FragmentSpread" do
       it "passes quickCheck" do
-       quickCheck (\(ArbitraryFragmentSpread t) -> (runParser (toQueryString t) fragmentSpread) === (Right t))
+       quickCheck' 5 (\(ArbitraryFragmentSpread t) -> (runParser (toQueryString t) fragmentSpread) === (Right t))
 
     describe "Field" do 
       it "passes quickCheck" do
-        quickCheck (\(ArbitraryField f ) -> (runParser (toQueryString f) field) === (Right f))
-
+        quickCheck' 5 (\(ArbitraryField f ) -> (runParser (toQueryString f) field) === (Right f))
 
     describe "Selection" do
       it "passes quickCheck" do
-        quickCheck (\(ArbitrarySelection s) -> (runParser (toQueryString s) selection) === (Right s))
+        quickCheck' 5 (\(ArbitrarySelection s) -> (runParser (toQueryString s) selection) === (Right s))
 
--}
+
     describe "SelectionSet" do
       it "passes quickCheck" do
-        quickCheck (\(ArbitrarySelectionSet s) -> (runParser (toQueryString s) selectionSet) === (Right s))
+        quickCheck' 5 (\(ArbitrarySelectionSet s) -> (runParser (toQueryString s) selectionSet) === (Right s))
 
     describe "InlineFragment" do
       it "passes quickCheck" do
-        quickCheck (\(ArbitraryInlineFragment f) -> (runParser (toQueryString f) inlineFragment) === (Right f))
+        quickCheck' 5 (\(ArbitraryInlineFragment f) -> (runParser (toQueryString f) inlineFragment) === (Right f))
 
     describe "VariableDefinition" do
       it "passes quickCheck" do
-        quickCheck (\(ArbitraryVariableDefinition d) -> (runParser (toQueryString d) variableDefinition) === (Right d))
-
+        quickCheck' 5 (\(ArbitraryVariableDefinition d) -> (runParser (toQueryString d) variableDefinition) === (Right d))
     describe "VariableDefinitions" do
       it "passes quickCheck" do
         quickCheck (\(ArbitraryVariableDefinitions ds) -> (runParser (toQueryString ds) variableDefinitions) === (Right ds))
 
+    describe "Definition" do
+      it "passes quickCheck" do
+        --quickCheck' 5 (\(ArbitraryDefinition d) -> (runParser (toQueryString d) definition) === (Right d))
+-}
+    describe "Document" do
+      it "parses the Kitchen Sink query" do 
+        (spy (runParser query1 document)) `shouldEqual` (Left (ParseError "Did not expect to find 'on'" (Position {line: 1, column: 3})))
 
-
+      it "parses the Kitchen Sink query" do 
+        (spy (runParser kitchenSink document)) `shouldEqual` (Left (ParseError "Did not expect to find 'on'" (Position {line: 1, column: 3})))
 
 
 strReverse :: String -> String
