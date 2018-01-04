@@ -1,4 +1,4 @@
-module Valence.Query.AST where
+module Valence.GraphQL.AST where
 
 import Prelude
 

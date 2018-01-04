@@ -23,8 +23,8 @@ import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (run)
 import Text.Parsing.Parser (ParseError(..), runParser)
 import Text.Parsing.Parser.Pos (Position(Position))
-import Valence.Query.AST (Alias(Alias), Argument(Argument), Arguments(Arguments), DefaultValue(DefaultValue), Definition(..), Directive(Directive), Directives(Directives), Field(..), FragmentName(FragmentName), FragmentSpread(FragmentSpread), GQLType(NamedType, ListType, NonNullType), InlineFragment(..), NonNull(NonNullNamed, NonNullList), ObjectField(ObjectField), OperationType(..), Selection(..), SelectionSet(..), TypeCondition(TypeCondition), Value(NullValue, BooleanValue, ListValue, StringValue, ObjectValue, FloatValue, IntValue, EnumValue, Variable), VariableDefinition(..), VariableDefinitions(..), toQueryString)
-import Valence.Query.Parser (alias, argument, arguments, defaultValue, definition, directive, directives, document, field, floatValue, fragmentName, fragmentSpread, gqlType, inlineFragment, intValue, name, punctuator, selection, selectionSet, stringValue, typeCondition, value, variableDefinition, variableDefinitions)
+import Valence.GraphQL.AST (Alias(Alias), Argument(Argument), Arguments(Arguments), DefaultValue(DefaultValue), Definition(..), Directive(Directive), Directives(Directives), Field(..), FragmentName(FragmentName), FragmentSpread(FragmentSpread), GQLType(NamedType, ListType, NonNullType), InlineFragment(..), NonNull(NonNullNamed, NonNullList), ObjectField(ObjectField), OperationType(..), Selection(..), SelectionSet(..), TypeCondition(TypeCondition), Value(NullValue, BooleanValue, ListValue, StringValue, ObjectValue, FloatValue, IntValue, EnumValue, Variable), VariableDefinition(..), VariableDefinitions(..), toQueryString)
+import Valence.GraphQL.Parser (alias, argument, arguments, defaultValue, definition, directive, directives, document, field, floatValue, fragmentName, fragmentSpread, gqlType, inlineFragment, intValue, name, punctuator, selection, selectionSet, stringValue, typeCondition, value, variableDefinition, variableDefinitions)
 
 kitchenSink :: String
 kitchenSink = """
@@ -405,7 +405,7 @@ main :: Eff (QCRunnerEffects () ) Unit
 main = run [consoleReporter] do 
 
   describe "Valence.Query.Parser" do
-{-}
+
     describe "NameGen" do
       it "the common case" do
         (runParser "asdf" name) `shouldEqual` (Right "asdf")
@@ -585,15 +585,15 @@ main = run [consoleReporter] do
 
     describe "Definition" do
       it "passes quickCheck" do
-        --quickCheck' 5 (\(ArbitraryDefinition d) -> (runParser (toQueryString d) definition) === (Right d))
--}
-    describe "Document" do
+        quickCheck' 5 (\(ArbitraryDefinition d) -> (runParser (toQueryString d) definition) === (Right d))
+
+{-    describe "Document" do
       it "parses the Kitchen Sink query" do 
         (spy (runParser query1 document)) `shouldEqual` (Left (ParseError "Did not expect to find 'on'" (Position {line: 1, column: 3})))
 
       it "parses the Kitchen Sink query" do 
         (spy (runParser kitchenSink document)) `shouldEqual` (Left (ParseError "Did not expect to find 'on'" (Position {line: 1, column: 3})))
-
+-}
 
 strReverse :: String -> String
 strReverse str = foldMap singleton (reverse $ toCharArray str)

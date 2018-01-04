@@ -1,4 +1,4 @@
-module Valence.Query.Parser where
+module Valence.GraphQL.Parser where
 
 import Control.Alt ((<|>))
 import Control.Lazy (fix)
@@ -14,8 +14,8 @@ import Text.Parsing.Parser (Parser, fail)
 import Text.Parsing.Parser.Combinators (between, lookAhead, manyTill, option, optionMaybe, skipMany, try)
 import Text.Parsing.Parser.String (char, eof, oneOf, satisfy, string)
 import Text.Parsing.Parser.Token (alphaNum, digit, letter)
-import Valence.Query.AST (Arguments(..), VariableDefinitions(..))
-import Valence.Query.AST as AST
+import Valence.GraphQL.AST (Arguments(..), VariableDefinitions(..))
+import Valence.GraphQL.AST as AST
 
 
 --| AST 
