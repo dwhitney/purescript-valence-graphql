@@ -1,5 +1,5 @@
 {
-  "name": "purescript-valence",
+  "name": "purescript-valence-graphql",
   "ignore": [
     "**/.*",
     "node_modules",
